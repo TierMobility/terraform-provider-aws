@@ -88,7 +88,7 @@ EOF
 * `enabled` - (Required) Specifies whether the rule is enabled.
 * `sql` - (Required) The SQL statement used to query the topic. For more information, see AWS IoT SQL Reference (http://docs.aws.amazon.com/iot/latest/developerguide/iot-rules.html#aws-iot-sql-reference) in the AWS IoT Developer Guide.
 * `sql_version` - (Required) The version of the SQL rules engine to use when evaluating the rule.
-* `error_action` - (Optional) Configuration block with error action to be associated with the rule. See the documentation for `cloudwatch_alarm`, `cloudwatch_metric`, `dynamodb`, `dynamodbv2`, `elasticsearch`, `firehose`, `iot_analytics`, `iot_events`, `kinesis`, `lambda`, `republish`, `s3`, `step_functions`, `sns`, `sqs` configuration blocks for further configuration details.
+* `error_action` - (Optional) Configuration block with error action to be associated with the rule. See the documentation for `cloudwatch_alarm`, `cloudwatch_metric`, `dynamodb`, `dynamodbv2`, `elasticsearch`, `firehose`, `http`, `iot_analytics`, `iot_events`, `kinesis`, `lambda`, `republish`, `s3`, `step_functions`, `sns`, `sqs` configuration blocks for further configuration details.
 * `tags` - (Optional) Key-value map of resource tags
 
 The `cloudwatch_alarm` object takes the following arguments:
@@ -190,6 +190,12 @@ The `iot_events` object takes the following arguments:
 * `input_name` - (Required) The name of the AWS IoT Events input.
 * `role_arn` - (Required) The ARN of the IAM role that grants access.
 * `message_id` - (Optional) Use this to ensure that only one input (message) with a given messageId is processed by an AWS IoT Events detector.
+
+The `http` object takes the following arguments:
+
+* `url` - (Required) The endpoint URL.
+* `confirmationUrl` - (Optional) The URL to which AWS IoT sends a confirmation message.
+* `headers` - (Optional) The HTTP headers to send with the message data.
 
 ## Attributes Reference
 

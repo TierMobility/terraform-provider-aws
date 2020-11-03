@@ -226,6 +226,38 @@ func resourceAwsIotTopicRule() *schema.Resource {
 					},
 				},
 			},
+			"http": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"url": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"confirmation_url": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"headers": {
+							Type:     schema.TypeList,
+							Optional: true,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"key": {
+										Type:     schema.TypeString,
+										Required: true,
+									},
+									"value": {
+										Type:     schema.TypeString,
+										Required: true,
+									},
+								}
+							}
+						},
+					},
+				},
+			},
 			"iot_analytics": {
 				Type:     schema.TypeSet,
 				Optional: true,
@@ -1155,6 +1187,14 @@ func resourceAwsIotTopicRuleRead(d *schema.ResourceData, meta interface{}) error
 		return fmt.Errorf("error setting firehose: %w", err)
 	}
 
+	if err := d.Set("http", flattenIotHttpActions(out.Rule.Actions)); err != nil {
+		return fmt.Errorf("error setting firehose: %w", err)
+	}
+
+	if err := d.Set("http", flattenIotHttpActions(out.Rule.Actions)); err != nil {
+		return fmt.Errorf("error setting http: %w", err)
+	}
+
 	if err := d.Set("iot_analytics", flattenIotIotAnalyticsActions(out.Rule.Actions)); err != nil {
 		return fmt.Errorf("error setting iot_analytics: %w", err)
 	}
@@ -1210,17 +1250,18 @@ func resourceAwsIotTopicRuleUpdate(d *schema.ResourceData, meta interface{}) err
 		"elasticsearch",
 		"enabled",
 		"firehose",
+		"http",
 		"iot_analytics",
 		"iot_events",
 		"kinesis",
 		"lambda",
 		"republish",
 		"s3",
-		"step_functions",
 		"sns",
-		"sql",
 		"sql_version",
+		"sql",
 		"sqs",
+		"step_functions",
 	) {
 		input := &iot.ReplaceTopicRuleInput{
 			RuleName:         aws.String(d.Get("name").(string)),
@@ -1457,6 +1498,46 @@ func expandIotFirehoseAction(tfList []interface{}) *iot.FirehoseAction {
 
 	if v, ok := tfMap["separator"].(string); ok && v != "" {
 		apiObject.Separator = aws.String(v)
+	}
+
+	return apiObject
+}
+
+func expandIotHttpActionHeaders(v []interface{}) []*iot.HttpActionHeader {
+	var httpActionHeaders []*iot.HttpActionHeader
+
+	for _, er := range v {
+		rer := er.(map[string]interface{})
+	​
+		httpActionHeader := &iot.HttpActionHeader{
+			Value: rer["key"].(string),
+			Key:   rer["value"].(string),
+		}
+	​
+		httpActionHeaders = append(httpActionHeaders, httpActionHeader)
+	}
+
+	return httpActionHeaders
+}
+
+func expandIotHttpAction(tfList []interface{}) *iot.HttpAction {
+	if len(tfList) == 0 || tfList[0] == nil {
+		return nil
+	}
+
+	apiObject := &iot.HttpAction{}
+	tfMap := tfList[0].(map[string]interface{})
+
+	if v, ok := tfMap["url"].(string); ok && v != "" {
+		apiObject.url = aws.String(v)
+	}
+
+	if v, ok := tfMap["confirmation_url"].(string); ok && v != "" {
+		apiObject.confirmationUrl = aws.String(v)
+	}
+
+	if v, ok := tfMap["headers"].([]interface{}); ok && v != "" {
+		apiObject.headers = expandIotHttpActionHeaders(v)
 	}
 
 	return apiObject
@@ -1727,6 +1808,17 @@ func expandIotTopicRulePayload(d *schema.ResourceData) *iot.TopicRulePayload {
 	}
 
 	// Legacy root attribute handling
+	for _, tfMapRaw := range d.Get("http").(*schema.Set).List() {
+		action := expandIotHttpAction([]interface{}{tfMapRaw})
+
+		if action == nil {
+			continue
+		}
+
+		actions = append(actions, &iot.Action{Http: action})
+	}
+
+	// Legacy root attribute handling
 	for _, tfMapRaw := range d.Get("iot_analytics").(*schema.Set).List() {
 		action := expandIotIotAnalyticsAction([]interface{}{tfMapRaw})
 
@@ -1895,6 +1987,16 @@ func expandIotTopicRulePayload(d *schema.ResourceData) *iot.TopicRulePayload {
 					}
 
 					iotErrorAction = &iot.Action{Firehose: action}
+				}
+			case "http":
+				for _, tfMapRaw := range v.([]interface{}) {
+					action := expandIotHttpAction([]interface{}{tfMapRaw})
+
+					if action == nil {
+						continue
+					}
+
+					iotErrorAction = &iot.Action{Http: action}
 				}
 			case "iot_analytics":
 				for _, tfMapRaw := range v.([]interface{}) {
@@ -2283,6 +2385,60 @@ func flattenIotFirehoseAction(apiObject *iot.FirehoseAction) []interface{} {
 }
 
 // Legacy root attribute handling
+func flattenIotHttpActions(actions []*iot.Action) []interface{} {
+	results := make([]interface{}, 0)
+
+	for _, action := range actions {
+		if action == nil {
+			continue
+		}
+
+		if v := action.Http; v != nil {
+			results = append(results, flattenIotHttpAction(v)...)
+		}
+	}
+
+	return results
+}
+
+func flattenIotHttpActionHeaders(v []*iot.HttpActionHeader) []interface{} {
+	var httpHeaders []interface{}
+​
+	for _, er := range v {
+		httpHeader := map[string]interface{}{
+			"value": er.Value,
+			"key":   er.Key,
+		}
+​
+		httpHeaders = append(httpHeaders, httpHeader)
+	}
+​
+	return httpHeaders
+}
+
+func flattenIotHttpAction(apiObject *iot.FirehoseAction) []interface{} {
+	if apiObject == nil {
+		return nil
+	}
+
+	tfMap := make(map[string]interface{})
+
+	if v := apiObject.Url; v != nil {
+		tfMap["url"] = aws.StringValue(v)
+	}
+
+	if v := apiObject.ConfirmationUrl; v != nil {
+		tfMap["confirmationUrl"] = aws.StringValue(v)
+	}
+
+	if v := apiObject.Headers; v != nil {
+		tfMap["headers"] = flattenIotHttpActionHeaders(v)
+	}
+
+	return []interface{}{tfMap}
+}
+
+// Legacy root attribute handling
 func flattenIotIotAnalyticsActions(actions []*iot.Action) []interface{} {
 	results := make([]interface{}, 0)
 
@@ -2642,6 +2798,10 @@ func flattenIotErrorAction(errorAction *iot.Action) []map[string]interface{} {
 	}
 	if errorAction.Firehose != nil {
 		results = append(results, map[string]interface{}{"firehose": flattenIotFirehoseActions(input)})
+		return results
+	}
+	if errorAction.Http != nil {
+		results = append(results, map[string]interface{}{"http": flattenIotHttpActions(input)})
 		return results
 	}
 	if errorAction.IotAnalytics != nil {
