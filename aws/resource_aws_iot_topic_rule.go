@@ -252,8 +252,8 @@ func resourceAwsIotTopicRule() *schema.Resource {
 										Type:     schema.TypeString,
 										Required: true,
 									},
-								}
-							}
+								},
+							},
 						},
 					},
 				},
@@ -1507,16 +1507,13 @@ func expandIotHttpActionHeaders(v []interface{}) []*iot.HttpActionHeader {
 	var httpActionHeaders []*iot.HttpActionHeader
 
 	for _, er := range v {
-		rer := er.(map[string]interface{})
-	​
+		rer := er.(map[string]interface{})​
 		httpActionHeader := &iot.HttpActionHeader{
 			Value: rer["key"].(string),
 			Key:   rer["value"].(string),
 		}
-	​
 		httpActionHeaders = append(httpActionHeaders, httpActionHeader)
 	}
-
 	return httpActionHeaders
 }
 
@@ -2403,13 +2400,11 @@ func flattenIotHttpActions(actions []*iot.Action) []interface{} {
 
 func flattenIotHttpActionHeaders(v []*iot.HttpActionHeader) []interface{} {
 	var httpHeaders []interface{}
-​
 	for _, er := range v {
 		httpHeader := map[string]interface{}{
 			"value": er.Value,
 			"key":   er.Key,
 		}
-​
 		httpHeaders = append(httpHeaders, httpHeader)
 	}
 ​
