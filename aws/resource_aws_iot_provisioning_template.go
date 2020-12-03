@@ -82,7 +82,7 @@ func resourceAwsIotProvisioningTemplateCreate(d *schema.ResourceData, meta inter
 	})
 
 	if err != nil {
-		log.Printf("[ERROR] %s", err)
+		fmt.Errorf("failed to create provisioning template %s", err)
 		return err
 	}
 
@@ -99,7 +99,7 @@ func resourceAwsIotProvisioningTemplateRead(d *schema.ResourceData, meta interfa
 	})
 
 	if err != nil {
-		log.Printf("[ERROR] %s", err)
+		fmt.Errorf("Failed to describe provisioning template %s", err)
 		return err
 	}
 
@@ -125,7 +125,7 @@ func resourceAwsIotProvisioningTemplateUpdate(d *schema.ResourceData, meta inter
 		})
 
 		if err != nil {
-			log.Printf("[ERROR] %s", err)
+			fmt.Errorf("Failed to create provisioning template version %s", err)
 			return err
 		}
 	}
@@ -151,7 +151,7 @@ func resourceAwsIotProvisioningTemplateUpdate(d *schema.ResourceData, meta inter
 		})
 
 		if err != nil {
-			log.Printf("[ERROR] %s", err)
+			fmt.Errorf("Failed to update provisioning template %s", err)
 			return err
 		}
 	}
@@ -167,7 +167,7 @@ func resourceAwsIotProvisioningTemplateDelete(d *schema.ResourceData, meta inter
 	})
 
 	if err != nil {
-		log.Printf("[ERROR] %s", err)
+		fmt.Errorf("failed to delete provisioning template %s", err)
 		return err
 	}
 
