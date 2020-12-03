@@ -5,7 +5,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/fsx"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 func describeFsxFileSystem(conn *fsx.FSx, id string) (*fsx.FileSystem, error) {
@@ -48,6 +48,26 @@ func refreshFsxFileSystemLifecycle(conn *fsx.FSx, id string) resource.StateRefre
 	}
 }
 
+func refreshFsxFileSystemLifecycleOptimizing(conn *fsx.FSx, id string) resource.StateRefreshFunc {
+	return func() (interface{}, string, error) {
+		filesystem, err := describeFsxFileSystem(conn, id)
+
+		if isAWSErr(err, fsx.ErrCodeFileSystemNotFound, "") {
+			return nil, "", nil
+		}
+
+		if err != nil {
+			return nil, "", err
+		}
+
+		if filesystem == nil {
+			return nil, "", nil
+		}
+
+		return filesystem, aws.StringValue(filesystem.AdministrativeActions[0].Status), nil
+	}
+}
+
 func waitForFsxFileSystemCreation(conn *fsx.FSx, id string, timeout time.Duration) error {
 	stateConf := &resource.StateChangeConf{
 		Pending: []string{fsx.FileSystemLifecycleCreating},
@@ -67,6 +87,37 @@ func waitForFsxFileSystemDeletion(conn *fsx.FSx, id string, timeout time.Duratio
 		Pending: []string{fsx.FileSystemLifecycleAvailable, fsx.FileSystemLifecycleDeleting},
 		Target:  []string{},
 		Refresh: refreshFsxFileSystemLifecycle(conn, id),
+		Timeout: timeout,
+		Delay:   30 * time.Second,
+	}
+
+	_, err := stateConf.WaitForState()
+
+	return err
+}
+
+func waitForFsxFileSystemUpdate(conn *fsx.FSx, id string, timeout time.Duration) error {
+	stateConf := &resource.StateChangeConf{
+		Pending: []string{fsx.FileSystemLifecycleUpdating},
+		Target:  []string{fsx.FileSystemLifecycleAvailable},
+		Refresh: refreshFsxFileSystemLifecycle(conn, id),
+		Timeout: timeout,
+		Delay:   30 * time.Second,
+	}
+
+	_, err := stateConf.WaitForState()
+
+	return err
+}
+
+func waitForFsxFileSystemUpdateOptimizing(conn *fsx.FSx, id string, timeout time.Duration) error {
+	stateConf := &resource.StateChangeConf{
+		Pending: []string{fsx.StatusInProgress},
+		Target: []string{
+			fsx.StatusCompleted,
+			fsx.StatusUpdatedOptimizing,
+		},
+		Refresh: refreshFsxFileSystemLifecycleOptimizing(conn, id),
 		Timeout: timeout,
 		Delay:   30 * time.Second,
 	}

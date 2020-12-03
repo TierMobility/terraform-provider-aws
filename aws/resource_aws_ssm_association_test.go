@@ -7,9 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ssm"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccAWSSSMAssociation_basic(t *testing.T) {
@@ -20,7 +20,7 @@ func TestAccAWSSSMAssociation_basic(t *testing.T) {
 		ec2conn := testAccProvider.Meta().(*AWSClient).ec2conn
 		ssmconn := testAccProvider.Meta().(*AWSClient).ssmconn
 
-		ins, err := ec2conn.DescribeInstances(&ec2.DescribeInstancesInput{
+		ins, err := resourceAwsInstanceFind(ec2conn, &ec2.DescribeInstancesInput{
 			Filters: []*ec2.Filter{
 				{
 					Name:   aws.String("tag:Name"),
@@ -31,17 +31,17 @@ func TestAccAWSSSMAssociation_basic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error getting instance with tag:Name %s: %s", name, err)
 		}
-		if len(ins.Reservations) == 0 || len(ins.Reservations[0].Instances) == 0 {
+		if len(ins) == 0 {
 			t.Fatalf("No instance exists with tag:Name %s", name)
 		}
-		instanceId := ins.Reservations[0].Instances[0].InstanceId
+		instanceID := ins[0].InstanceId
 
 		_, err = ssmconn.DeleteAssociation(&ssm.DeleteAssociationInput{
 			Name:       aws.String(name),
-			InstanceId: instanceId,
+			InstanceId: instanceID,
 		})
 		if err != nil {
-			t.Fatalf("Error deleting ssm association %s/%s: %s", name, aws.StringValue(instanceId), err)
+			t.Fatalf("Error deleting ssm association %s/%s: %s", name, aws.StringValue(instanceID), err)
 		}
 	}
 
@@ -76,19 +76,26 @@ func TestAccAWSSSMAssociation_withTargets(t *testing.T) {
 	name := acctest.RandString(10)
 	resourceName := "aws_ssm_association.test"
 	oneTarget := `
-	targets {
-    key = "tag:Name"
-    values = ["acceptanceTest"]
-  }`
+
+targets {
+  key    = "tag:Name"
+  values = ["acceptanceTest"]
+}
+`
+
 	twoTargets := `
-	targets {
-    key = "tag:Name"
-    values = ["acceptanceTest"]
-  }
-  targets {
-    key = "tag:ExtraName"
-    values = ["acceptanceTest"]
-  }`
+
+targets {
+  key    = "tag:Name"
+  values = ["acceptanceTest"]
+}
+
+targets {
+  key    = "tag:ExtraName"
+  values = ["acceptanceTest"]
+}
+`
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
@@ -529,21 +536,13 @@ func testAccCheckAWSSSMAssociationDestroy(s *terraform.State) error {
 }
 
 func testAccAWSSSMAssociationBasicConfigWithAutomationTargetParamName(rName string) string {
-	return fmt.Sprintf(`
-data "aws_ami" "ssm_ami" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["*hvm-ssd/ubuntu-trusty-14.04*"]
-  }
-}
-
+	return composeConfig(testAccLatestAmazonLinuxHvmEbsAmiConfig(), fmt.Sprintf(`
 resource "aws_iam_instance_profile" "ssm_profile" {
   name = "ssm_profile-%[1]s"
-  role = "${aws_iam_role.ssm_role.name}"
+  role = aws_iam_role.ssm_role.name
 }
+
+data "aws_partition" "current" {}
 
 resource "aws_iam_role" "ssm_role" {
   name = "ssm_role-%[1]s"
@@ -551,19 +550,20 @@ resource "aws_iam_role" "ssm_role" {
 
   assume_role_policy = <<EOF
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Action": "sts:AssumeRole",
-            "Principal": {
-               "Service": "ec2.amazonaws.com"
-            },
-            "Effect": "Allow",
-            "Sid": ""
-        }
-    ]
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "ec2.${data.aws_partition.current.dns_suffix}"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
 }
 EOF
+
 }
 
 resource "aws_ssm_document" "foo" {
@@ -571,79 +571,80 @@ resource "aws_ssm_document" "foo" {
   document_type = "Automation"
 
   content = <<DOC
-	{
-	   "description": "Systems Manager Automation Demo",
-	   "schemaVersion": "0.3",
-	   "assumeRole": "${aws_iam_role.ssm_role.arn}",
-       "parameters":{
-	     "Directory": {
-		    "description":"(Optional) The path to the working directory on your instance.",
-		    "default":"",
-		    "type": "String",
-		    "maxChars": 4096
-	     }
-       },
-	   "mainSteps": [
-	      {
-	         "name": "startInstances",
-	         "action": "aws:runInstances",
-	         "timeoutSeconds": 1200,
-	         "maxAttempts": 1,
-	         "onFailure": "Abort",
-	         "inputs": {
-	            "ImageId": "${data.aws_ami.ssm_ami.id}",
-	            "InstanceType": "t2.small",
-	            "MinInstanceCount": 1,
-	            "MaxInstanceCount": 1,
-	            "IamInstanceProfileName": "${aws_iam_instance_profile.ssm_profile.name}"
-	         }
-	      },
-	      {
-	         "name": "stopInstance",
-	         "action": "aws:changeInstanceState",
-	         "maxAttempts": 1,
-	         "onFailure": "Continue",
-	         "inputs": {
-	            "InstanceIds": [
-	               "{{ startInstances.InstanceIds }}"
-	            ],
-	            "DesiredState": "stopped"
-	         }
-	      },
-	      {
-	         "name": "terminateInstance",
-	         "action": "aws:changeInstanceState",
-	         "maxAttempts": 1,
-	         "onFailure": "Continue",
-	         "inputs": {
-	            "InstanceIds": [
-	               "{{ startInstances.InstanceIds }}"
-	            ],
-	            "DesiredState": "terminated"
-	         }
-	      }
-	   ]
-	}
+{
+  "description": "Systems Manager Automation Demo",
+  "schemaVersion": "0.3",
+  "assumeRole": "${aws_iam_role.ssm_role.arn}",
+  "parameters": {
+    "Directory": {
+      "description": "(Optional) The path to the working directory on your instance.",
+      "default": "",
+      "type": "String",
+      "maxChars": 4096
+    }
+  },
+  "mainSteps": [
+    {
+      "name": "startInstances",
+      "action": "aws:runInstances",
+      "timeoutSeconds": 1200,
+      "maxAttempts": 1,
+      "onFailure": "Abort",
+      "inputs": {
+        "ImageId": "${data.aws_ami.amzn-ami-minimal-hvm-ebs.id}",
+        "InstanceType": "t2.small",
+        "MinInstanceCount": 1,
+        "MaxInstanceCount": 1,
+        "IamInstanceProfileName": "${aws_iam_instance_profile.ssm_profile.name}"
+      }
+    },
+    {
+      "name": "stopInstance",
+      "action": "aws:changeInstanceState",
+      "maxAttempts": 1,
+      "onFailure": "Continue",
+      "inputs": {
+        "InstanceIds": [
+          "{{ startInstances.InstanceIds }}"
+        ],
+        "DesiredState": "stopped"
+      }
+    },
+    {
+      "name": "terminateInstance",
+      "action": "aws:changeInstanceState",
+      "maxAttempts": 1,
+      "onFailure": "Continue",
+      "inputs": {
+        "InstanceIds": [
+          "{{ startInstances.InstanceIds }}"
+        ],
+        "DesiredState": "terminated"
+      }
+    }
+  ]
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.foo.name}"
+  name                             = aws_ssm_document.foo.name
   automation_target_parameter_name = "Directory"
 
   parameters = {
-    AutomationAssumeRole = "${aws_iam_role.ssm_role.id}"
+    AutomationAssumeRole = aws_iam_role.ssm_role.id
     Directory            = "myWorkSpace"
   }
 
   targets {
-    key      = "tag:myTagName"
-    values   = ["myTagValue"]
+    key    = "tag:myTagName"
+    values = ["myTagValue"]
   }
 
   schedule_expression = "rate(60 minutes)"
 }
-`, rName)
+`, rName))
 }
 
 func testAccAWSSSMAssociationBasicConfigWithParametersUpdated(rName string) string {
@@ -653,33 +654,36 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<-DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-	  "Directory": {
-		"description":"(Optional) The path to the working directory on your instance.",
-		"default":"",
-		"type": "String",
-		"maxChars": 4096
-	  }
-	},
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {
+    "Directory": {
+      "description": "(Optional) The path to the working directory on your instance.",
+      "default": "",
+      "type": "String",
+      "maxChars": 4096
+    }
+  },
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
   DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.test.name}"
+  name = aws_ssm_document.test.name
 
   parameters = {
     Directory = "myWorkSpaceUpdated"
@@ -700,33 +704,36 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<-DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-	  "Directory": {
-		"description":"(Optional) The path to the working directory on your instance.",
-		"default":"",
-		"type": "String",
-		"maxChars": 4096
-	  }
-	},
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {
+    "Directory": {
+      "description": "(Optional) The path to the working directory on your instance.",
+      "default": "",
+      "type": "String",
+      "maxChars": 4096
+    }
+  },
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
   DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.test.name}"
+  name = aws_ssm_document.test.name
 
   parameters = {
     Directory = "myWorkSpace"
@@ -743,31 +750,33 @@ resource "aws_ssm_association" "test" {
 func testAccAWSSSMAssociationBasicConfigWithTargets(rName, targetsStr string) string {
 	return fmt.Sprintf(`
 resource "aws_ssm_document" "test" {
-  name = "test_document_association-%s"
+  name          = "test_document_association-%s"
   document_type = "Command"
-  content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
 
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+  content = <<DOC
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.test.name}"
+  name = aws_ssm_document.test.name
   %s
 }
 `, rName, targetsStr)
@@ -779,7 +788,14 @@ variable "name" {
   default = "%s"
 }
 
-data "aws_availability_zones" "available" {}
+data "aws_availability_zones" "available" {
+  state = "available"
+
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
+}
 
 data "aws_ami" "amzn" {
   most_recent = true
@@ -795,20 +811,20 @@ resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
 
   tags = {
-    Name = "${var.name}"
+    Name = var.name
   }
 }
 
 resource "aws_subnet" "first" {
-  vpc_id            = "${aws_vpc.main.id}"
+  vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.0.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[0]}"
+  availability_zone = data.aws_availability_zones.available.names[0]
 }
 
 resource "aws_security_group" "test" {
-  name        = "${var.name}"
+  name        = var.name
   description = "foo"
-  vpc_id      = "${aws_vpc.main.id}"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     protocol    = "icmp"
@@ -819,45 +835,46 @@ resource "aws_security_group" "test" {
 }
 
 resource "aws_instance" "test" {
-  ami                    = "${data.aws_ami.amzn.image_id}"
-  availability_zone      = "${data.aws_availability_zones.available.names[0]}"
+  ami                    = data.aws_ami.amzn.image_id
+  availability_zone      = data.aws_availability_zones.available.names[0]
   instance_type          = "t2.micro"
-  vpc_security_group_ids = ["${aws_security_group.test.id}"]
-  subnet_id              = "${aws_subnet.first.id}"
+  vpc_security_group_ids = [aws_security_group.test.id]
+  subnet_id              = aws_subnet.first.id
 
   tags = {
-    Name = "${var.name}"
+    Name = var.name
   }
 }
 
 resource "aws_ssm_document" "test" {
-  name          = "${var.name}"
+  name          = var.name
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name        = "${var.name}"
-  instance_id = "${aws_instance.test.id}"
+  name        = var.name
+  instance_id = aws_instance.test.id
 }
 `, rName)
 }
@@ -869,29 +886,30 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
   name             = "test_document_association-%s"
-  document_version = "${aws_ssm_document.test.latest_version}"
+  document_version = aws_ssm_document.test.latest_version
 
   targets {
     key    = "tag:Name"
@@ -908,28 +926,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name                = "${aws_ssm_document.test.name}"
+  name                = aws_ssm_document.test.name
   schedule_expression = "cron(0 16 ? * TUE *)"
 
   targets {
@@ -947,28 +966,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name                = "${aws_ssm_document.test.name}"
+  name                = aws_ssm_document.test.name
   schedule_expression = "cron(0 16 ? * WED *)"
 
   targets {
@@ -991,28 +1011,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.test.name}"
+  name = aws_ssm_document.test.name
 
   targets {
     key    = "tag:Name"
@@ -1020,7 +1041,7 @@ resource "aws_ssm_association" "test" {
   }
 
   output_location {
-    s3_bucket_name = "${aws_s3_bucket.output_location.id}"
+    s3_bucket_name = aws_s3_bucket.output_location.id
     s3_key_prefix  = "SSMAssociation"
   }
 }
@@ -1044,28 +1065,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.test.name}"
+  name = aws_ssm_document.test.name
 
   targets {
     key    = "tag:Name"
@@ -1073,7 +1095,7 @@ resource "aws_ssm_association" "test" {
   }
 
   output_location {
-    s3_bucket_name = "${aws_s3_bucket.output_location_updated.id}"
+    s3_bucket_name = aws_s3_bucket.output_location_updated.id
     s3_key_prefix  = "SSMAssociation"
   }
 }
@@ -1097,28 +1119,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name = "${aws_ssm_document.test.name}"
+  name = aws_ssm_document.test.name
 
   targets {
     key    = "tag:Name"
@@ -1126,7 +1149,7 @@ resource "aws_ssm_association" "test" {
   }
 
   output_location {
-    s3_bucket_name = "${aws_s3_bucket.output_location_updated.id}"
+    s3_bucket_name = aws_s3_bucket.output_location_updated.id
     s3_key_prefix  = "UpdatedAssociation"
   }
 }
@@ -1140,27 +1163,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name             = "${aws_ssm_document.test.name}"
+  name             = aws_ssm_document.test.name
   association_name = "%s"
 
   targets {
@@ -1178,28 +1203,30 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
   association_name    = %q
-  name                = "${aws_ssm_document.test.name}"
+  name                = aws_ssm_document.test.name
   schedule_expression = %q
 
   targets {
@@ -1217,27 +1244,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name                = "${aws_ssm_document.test.name}"
+  name                = aws_ssm_document.test.name
   association_name    = "%s"
   compliance_severity = "%s"
 
@@ -1256,27 +1285,29 @@ resource "aws_ssm_document" "test" {
   document_type = "Command"
 
   content = <<DOC
-  {
-    "schemaVersion": "1.2",
-    "description": "Check ip configuration of a Linux instance.",
-    "parameters": {
-    },
-    "runtimeConfig": {
-      "aws:runShellScript": {
-        "properties": [
-          {
-            "id": "0.aws:runShellScript",
-            "runCommand": ["ifconfig"]
-          }
-        ]
-      }
+{
+  "schemaVersion": "1.2",
+  "description": "Check ip configuration of a Linux instance.",
+  "parameters": {},
+  "runtimeConfig": {
+    "aws:runShellScript": {
+      "properties": [
+        {
+          "id": "0.aws:runShellScript",
+          "runCommand": [
+            "ifconfig"
+          ]
+        }
+      ]
     }
   }
+}
 DOC
+
 }
 
 resource "aws_ssm_association" "test" {
-  name            = "${aws_ssm_document.test.name}"
+  name            = aws_ssm_document.test.name
   max_concurrency = "%s"
   max_errors      = "%s"
 
