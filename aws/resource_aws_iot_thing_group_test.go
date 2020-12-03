@@ -474,7 +474,7 @@ resource "aws_iot_thing_group" "parent" {
 
 resource "aws_iot_thing_group" "test" {
   name = "%s"
-  parent_group_name = "${aws_iot_thing_group.parent.name}"
+  parent_group_name = aws_iot_thing_group.parent.name
 
   properties {
     attributes = {
@@ -560,7 +560,7 @@ resource "aws_iot_thing_group" "parent" {
 
 resource "aws_iot_thing_group" "test" {
   name = "%s"
-  parent_group_name = "${aws_iot_thing_group.parent.name}"
+  parent_group_name = aws_iot_thing_group.parent.name
 }
 `, parentThingGroupName, thingGroupName)
 }
