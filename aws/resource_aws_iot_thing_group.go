@@ -260,7 +260,7 @@ func expandIotGroupNameAndArnList(lgn []*iot.GroupNameAndArn) []*iot.GroupNameAn
 	vs := make([]*iot.GroupNameAndArn, 0, len(lgn))
 	for _, v := range lgn {
 		val, ok := interface{}(v).(iot.GroupNameAndArn)
-		if ok && &val != nil {
+		if ok && val != nil {
 			vs = append(vs, &iot.GroupNameAndArn{
 				GroupName: val.GroupName,
 				GroupArn:  val.GroupArn,
