@@ -153,6 +153,10 @@ func resourceAwsIotProvisioningTemplateUpdate(d *schema.ResourceData, meta inter
 			return nil
 		})
 
+		if isResourceTimeoutError(err) {
+			_, err = conn.CreateProvisioningTemplate(createOpts)
+		}
+
 		if err != nil {
 			return fmt.Errorf("Failed to update provisioning template %s", err)
 		}
