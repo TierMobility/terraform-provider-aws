@@ -2,12 +2,13 @@ package aws
 
 import (
 	"fmt"
+	"log"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/iot"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/terraform-providers/terraform-provider-aws/aws/internal/keyvaluetags"
-	"log"
 )
 
 func resourceAwsIotThingGroup() *schema.Resource {
@@ -42,6 +43,7 @@ func resourceAwsIotThingGroup() *schema.Resource {
 						"attributes": {
 							Type:     schema.TypeMap,
 							Optional: true,
+							Elem:     &schema.Schema{Type: schema.TypeString},
 						},
 						"description": {
 							Type:     schema.TypeString,
@@ -121,6 +123,7 @@ func resourceAwsIotThingGroupCreate(d *schema.ResourceData, meta interface{}) er
 
 func resourceAwsIotThingGroupRead(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).iotconn
+	ignoreTagsConfig := meta.(*AWSClient).IgnoreTagsConfig
 
 	input := &iot.DescribeThingGroupInput{
 		ThingGroupName: aws.String(d.Id()),
@@ -153,7 +156,7 @@ func resourceAwsIotThingGroupRead(d *schema.ResourceData, meta interface{}) erro
 		return fmt.Errorf("error listing tags for Iot Thing Group (%s): %s", d.Id(), err)
 	}
 
-	if err := d.Set("tags", tags.IgnoreAws().Map()); err != nil {
+	if err := d.Set("tags", tags.IgnoreAws().IgnoreConfig(ignoreTagsConfig).Map()); err != nil {
 		return fmt.Errorf("error setting tags: %s", err)
 	}
 
