@@ -84,7 +84,7 @@ func resourceAwsIotProvisioningTemplateCreate(d *schema.ResourceData, meta inter
 	})
 
 	if isResourceTimeoutError(err) {
-		resp, err = conn.CreateProvisioningTemplate(createOpts)
+		out, err = conn.CreateProvisioningTemplate(createOpts)
 	}
 
 	if err != nil {
