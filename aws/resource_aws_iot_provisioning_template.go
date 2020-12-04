@@ -59,16 +59,18 @@ func resourceAwsIotProvisioningTemplate() *schema.Resource {
 func resourceAwsIotProvisioningTemplateCreate(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).iotconn
 
+	createOpts := &iot.CreateProvisioningTemplateInput{
+		Description:         aws.String(d.Get("description").(string)),
+		Enabled:             aws.Bool(d.Get("enabled").(bool)),
+		ProvisioningRoleArn: aws.String(d.Get("provisioning_role_arn").(string)),
+		TemplateBody:        aws.String(d.Get("template_body").(string)),
+		TemplateName:        aws.String(d.Get("template_name").(string)),
+	}
+
 	var out *iot.CreateProvisioningTemplateOutput
 	err := resource.Retry(1*time.Minute, func() *resource.RetryError {
 		var err error
-		out, err = conn.CreateProvisioningTemplate(&iot.CreateProvisioningTemplateInput{
-			Description:         aws.String(d.Get("description").(string)),
-			Enabled:             aws.Bool(d.Get("enabled").(bool)),
-			ProvisioningRoleArn: aws.String(d.Get("provisioning_role_arn").(string)),
-			TemplateBody:        aws.String(d.Get("template_body").(string)),
-			TemplateName:        aws.String(d.Get("template_name").(string)),
-		})
+		out, err = conn.CreateProvisioningTemplate(createOpts)
 
 		if err != nil {
 			// Handle IoT not detecting the provisioning role's assume role policy immediately.
@@ -80,6 +82,10 @@ func resourceAwsIotProvisioningTemplateCreate(d *schema.ResourceData, meta inter
 
 		return nil
 	})
+
+	if isResourceTimeoutError(err) {
+		resp, err = conn.CreateProvisioningTemplate(createOpts)
+	}
 
 	if err != nil {
 		return fmt.Errorf("failed to create provisioning template %s", err)
