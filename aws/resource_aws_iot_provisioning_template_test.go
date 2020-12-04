@@ -115,9 +115,11 @@ resource "aws_iam_role" "iot_fleet_provisioning" {
   assume_role_policy = data.aws_iam_policy_document.iot_assume_role_policy.json
 }
 
+data "aws_partition" "iot_fleet_provisioning_test" {}
+
 resource "aws_iam_role_policy_attachment" "iot_fleet_provisioning_registration" {
   role       = aws_iam_role.iot_fleet_provisioning.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSIoTThingsRegistration"
+  policy_arn = "arn:${data.aws_partition.iot_fleet_provisioning_test.partition}:iam::aws:policy/service-role/AWSIoTThingsRegistration"
 }
 
 data "aws_iam_policy_document" "device_policy" {
