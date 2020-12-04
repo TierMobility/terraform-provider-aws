@@ -134,13 +134,15 @@ func resourceAwsIotProvisioningTemplateUpdate(d *schema.ResourceData, meta inter
 	}
 
 	if d.HasChanges("description", "enabled", "provisioning_role_arn") {
+		updateOpts := &iot.UpdateProvisioningTemplateInput{
+			Description:         aws.String(d.Get("description").(string)),
+			Enabled:             aws.Bool(d.Get("enabled").(bool)),
+			ProvisioningRoleArn: aws.String(d.Get("provisioning_role_arn").(string)),
+			TemplateName:        aws.String(d.Id()),
+		}
+
 		err := resource.Retry(1*time.Minute, func() *resource.RetryError {
-			_, err := conn.UpdateProvisioningTemplate(&iot.UpdateProvisioningTemplateInput{
-				Description:         aws.String(d.Get("description").(string)),
-				Enabled:             aws.Bool(d.Get("enabled").(bool)),
-				ProvisioningRoleArn: aws.String(d.Get("provisioning_role_arn").(string)),
-				TemplateName:        aws.String(d.Id()),
-			})
+			_, err := conn.UpdateProvisioningTemplate(updateOpts)
 
 			if err != nil {
 				// Handle IoT not detecting the provisioning role's assume role policy immediately.
@@ -154,7 +156,7 @@ func resourceAwsIotProvisioningTemplateUpdate(d *schema.ResourceData, meta inter
 		})
 
 		if isResourceTimeoutError(err) {
-			_, err = conn.CreateProvisioningTemplate(createOpts)
+			_, err = conn.UpdateProvisioningTemplate(updateOpts)
 		}
 
 		if err != nil {
