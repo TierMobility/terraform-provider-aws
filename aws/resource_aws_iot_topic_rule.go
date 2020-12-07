@@ -253,6 +253,7 @@ func resourceAwsIotTopicRule() *schema.Resource {
 									"value": {
 										Type:     schema.TypeString,
 										Required: true,
+										Sensitive: true,
 									},
 								},
 							},
