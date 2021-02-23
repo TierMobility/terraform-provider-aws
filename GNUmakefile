@@ -6,6 +6,13 @@ TEST_COUNT?=1
 ACCTEST_TIMEOUT?=120m
 ACCTEST_PARALLELISM?=20
 
+PKG_OS ?= darwin linux
+PKG_ARCH ?= amd64
+BASE_PATH ?= $(shell pwd)
+BUILD_PATH ?= $(BASE_PATH)/build
+PROVIDER := $(shell basename $(BASE_PATH))
+VERSION ?= v0.0.0
+
 default: build
 
 build: fmtcheck
@@ -148,5 +155,16 @@ website-lint-fix:
 	@misspell -w -source=text website/
 	@docker run -v $(PWD):/markdown 06kellyjac/markdownlint-cli --fix website/docs/
 	@terrafmt fmt ./website --pattern '*.markdown'
+
+packages:
+	@for os in $(PKG_OS); do \
+		for arch in $(PKG_ARCH); do \
+			mkdir -p $(BUILD_PATH)/$(PROVIDER)_$${os}_$${arch} && \
+			cd $(BASE_PATH) && \
+			CGO_ENABLED=0 GOOS=$${os} GOARCH=$${arch} go build -o $(BUILD_PATH)/$(PROVIDER)_$${os}_$${arch}/$(PROVIDER)_$(VERSION) . && \
+			cd $(BUILD_PATH) && \
+			tar -cvzf $(BUILD_PATH)/$(PROVIDER)_$(BRANCH)_$${os}_$${arch}.tar.gz $(PROVIDER)_$${os}_$${arch}/; \
+		done; \
+	done;
 
 .PHONY: awsproviderlint build gen golangci-lint sweep test testacc fmt fmtcheck lint tools test-compile website-link-check website-lint website-lint-fix depscheck docscheck
