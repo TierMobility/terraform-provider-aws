@@ -1131,6 +1131,7 @@ func resourceAwsIotTopicRuleUpdate(d *schema.ResourceData, meta interface{}) err
 		"http",
 		"iot_analytics",
 		"iot_events",
+		"kafka",
 		"kinesis",
 		"lambda",
 		"republish",
@@ -1444,11 +1445,11 @@ func expandIotKafkaAction(tfList []interface{}) *iot.KafkaAction {
 	}
 
 	if v, ok := tfMap["partition"].(string); ok && v != "" {
-		apiObject.Key = aws.String(v)
+		apiObject.Partition = aws.String(v)
 	}
 
 	if v, ok := tfMap["topic"].(string); ok && v != "" {
-		apiObject.Key = aws.String(v)
+		apiObject.Topic = aws.String(v)
 	}
 
 	return apiObject
