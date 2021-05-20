@@ -5,9 +5,12 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/iot"
+	"github.com/hashicorp/aws-sdk-go-base/tfawserr"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/terraform-providers/terraform-provider-aws/aws/internal/keyvaluetags"
+	"github.com/terraform-providers/terraform-provider-aws/aws/internal/tfresource"
 )
 
 var (
@@ -289,8 +292,9 @@ func resourceAwsIotTopicRule() *schema.Resource {
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"client_properties": {
-							Type:     schema.TypeMap,
-							Required: true,
+							Type:      schema.TypeMap,
+							Required:  true,
+							Sensitive: true,
 						},
 						"destination_arn": {
 							Type:     schema.TypeString,
@@ -754,8 +758,9 @@ func resourceAwsIotTopicRule() *schema.Resource {
 							ExactlyOneOf: errorActions,
 						},
 						"kafka": {
-							Type:     schema.TypeSet,
+							Type:     schema.TypeList,
 							Optional: true,
+							MaxItems: 1,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"client_properties": {
@@ -1010,6 +1015,22 @@ func resourceAwsIotTopicRuleCreate(d *schema.ResourceData, meta interface{}) err
 	return resourceAwsIotTopicRuleRead(d, meta)
 }
 
+func getTopicRule(conn *iot.IoT, input *iot.GetTopicRuleInput) (*iot.GetTopicRuleOutput, error) {
+	out, err := conn.GetTopicRule(input)
+	if err != nil {
+		if tfawserr.ErrCodeEquals(err, iot.ErrCodeUnauthorizedException) {
+			return nil, &resource.NotFoundError{
+				LastError:   err,
+				LastRequest: input,
+			}
+		}
+
+		return nil, err
+	}
+
+	return out, nil
+}
+
 func resourceAwsIotTopicRuleRead(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).iotconn
 	ignoreTagsConfig := meta.(*AWSClient).IgnoreTagsConfig
@@ -1018,9 +1039,13 @@ func resourceAwsIotTopicRuleRead(d *schema.ResourceData, meta interface{}) error
 		RuleName: aws.String(d.Id()),
 	}
 
-	out, err := conn.GetTopicRule(input)
-
+	out, err := getTopicRule(conn, input)
 	if err != nil {
+		if tfresource.NotFound(err) {
+			d.SetId("")
+			return nil
+		}
+
 		return fmt.Errorf("error getting IoT Topic Rule (%s): %w", d.Id(), err)
 	}
 
@@ -1148,7 +1173,6 @@ func resourceAwsIotTopicRuleUpdate(d *schema.ResourceData, meta interface{}) err
 		}
 
 		_, err := conn.ReplaceTopicRule(input)
-
 		if err != nil {
 			return fmt.Errorf("error updating IoT Topic Rule (%s): %w", d.Id(), err)
 		}
@@ -1426,7 +1450,7 @@ func expandIotKafkaAction(tfList []interface{}) *iot.KafkaAction {
 	apiObject := &iot.KafkaAction{}
 	tfMap := tfList[0].(map[string]interface{})
 
-	if v, ok := tfMap["client_properties"].(map[string]interface{}); ok {
+	if v, ok := tfMap["client_properties"].(map[string]interface{}); ok && len(v) > 0 {
 		m := make(map[string]*string)
 		for key, val := range v {
 			value := val.(string)
@@ -1738,7 +1762,9 @@ func expandIotTopicRulePayload(d *schema.ResourceData) *iot.TopicRulePayload {
 			continue
 		}
 
-		actions = append(actions, &iot.Action{Kafka: action})
+		if len(action.ClientProperties) > 0 {
+			actions = append(actions, &iot.Action{Kafka: action})
+		}
 	}
 
 	// Legacy root attribute handling
