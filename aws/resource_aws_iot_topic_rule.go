@@ -1188,6 +1188,7 @@ func resourceAwsIotTopicRuleUpdate(d *schema.ResourceData, meta interface{}) err
 		"cloudwatch_metric",
 		"cloudwatch_logs",
 		"description",
+		"error_action",
 		"dynamodb",
 		"dynamodbv2",
 		"elasticsearch",
