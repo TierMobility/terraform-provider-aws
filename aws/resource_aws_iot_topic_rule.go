@@ -17,6 +17,7 @@ var (
 	errorActions = []string{
 		"error_action.0.cloudwatch_alarm",
 		"error_action.0.cloudwatch_metric",
+		"error_action.0.cloudwatch_logs",
 		"error_action.0.dynamodb",
 		"error_action.0.dynamodbv2",
 		"error_action.0.elasticsearch",
@@ -107,6 +108,22 @@ func resourceAwsIotTopicRule() *schema.Resource {
 							Type:         schema.TypeString,
 							Required:     true,
 							ValidateFunc: validateArn,
+						},
+					},
+				},
+			},
+			"cloudwatch_logs": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"log_group_name": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"role_arn": {
+							Type:     schema.TypeString,
+							Required: true,
 						},
 					},
 				},
@@ -576,6 +593,24 @@ func resourceAwsIotTopicRule() *schema.Resource {
 										Type:         schema.TypeString,
 										Required:     true,
 										ValidateFunc: validateArn,
+									},
+								},
+							},
+							ExactlyOneOf: errorActions,
+						},
+						"cloudwatch_logs": {
+							Type:     schema.TypeList,
+							Optional: true,
+							MaxItems: 1,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"log_group_name": {
+										Type:     schema.TypeString,
+										Required: true,
+									},
+									"role_arn": {
+										Type:     schema.TypeString,
+										Required: true,
 									},
 								},
 							},
@@ -1074,6 +1109,10 @@ func resourceAwsIotTopicRuleRead(d *schema.ResourceData, meta interface{}) error
 		return fmt.Errorf("error setting cloudwatch_metric: %w", err)
 	}
 
+	if err := d.Set("cloudwatch_logs", flattenIotCloudwatchLogsActions(out.Rule.Actions)); err != nil {
+		return fmt.Errorf("error setting cloudwatch_logs: %w", err)
+	}
+
 	if err := d.Set("dynamodb", flattenIotDynamoDbActions(out.Rule.Actions)); err != nil {
 		return fmt.Errorf("error setting dynamodb: %w", err)
 	}
@@ -1147,6 +1186,7 @@ func resourceAwsIotTopicRuleUpdate(d *schema.ResourceData, meta interface{}) err
 	if d.HasChanges(
 		"cloudwatch_alarm",
 		"cloudwatch_metric",
+		"cloudwatch_logs",
 		"description",
 		"dynamodb",
 		"dynamodbv2",
@@ -1273,6 +1313,25 @@ func expandIotCloudwatchMetricAction(tfList []interface{}) *iot.CloudwatchMetric
 
 	if v, ok := tfMap["metric_value"].(string); ok && v != "" {
 		apiObject.MetricValue = aws.String(v)
+	}
+
+	if v, ok := tfMap["role_arn"].(string); ok && v != "" {
+		apiObject.RoleArn = aws.String(v)
+	}
+
+	return apiObject
+}
+
+func expandIotCloudwatchLogsAction(tfList []interface{}) *iot.CloudwatchLogsAction {
+	if len(tfList) == 0 || tfList[0] == nil {
+		return nil
+	}
+
+	apiObject := &iot.CloudwatchLogsAction{}
+	tfMap := tfList[0].(map[string]interface{})
+
+	if v, ok := tfMap["log_group_name"].(string); ok && v != "" {
+		apiObject.LogGroupName = aws.String(v)
 	}
 
 	if v, ok := tfMap["role_arn"].(string); ok && v != "" {
@@ -1700,6 +1759,17 @@ func expandIotTopicRulePayload(d *schema.ResourceData) *iot.TopicRulePayload {
 	}
 
 	// Legacy root attribute handling
+	for _, tfMapRaw := range d.Get("cloudwatch_logs").(*schema.Set).List() {
+		action := expandIotCloudwatchLogsAction([]interface{}{tfMapRaw})
+
+		if action == nil {
+			continue
+		}
+
+		actions = append(actions, &iot.Action{CloudwatchLogs: action})
+	}
+
+	// Legacy root attribute handling
 	for _, tfMapRaw := range d.Get("dynamodb").(*schema.Set).List() {
 		action := expandIotDynamoDBAction([]interface{}{tfMapRaw})
 
@@ -1896,6 +1966,16 @@ func expandIotTopicRulePayload(d *schema.ResourceData) *iot.TopicRulePayload {
 					}
 
 					iotErrorAction = &iot.Action{CloudwatchMetric: action}
+				}
+			case "cloudwatch_logs":
+				for _, tfMapRaw := range v.([]interface{}) {
+					action := expandIotCloudwatchLogsAction([]interface{}{tfMapRaw})
+
+					if action == nil {
+						continue
+					}
+
+					iotErrorAction = &iot.Action{CloudwatchLogs: action}
 				}
 			case "dynamodb":
 				for _, tfMapRaw := range v.([]interface{}) {
@@ -2146,6 +2226,41 @@ func flattenIotCloudwatchMetricAction(apiObject *iot.CloudwatchMetricAction) []i
 
 	if v := apiObject.MetricValue; v != nil {
 		tfMap["metric_value"] = aws.StringValue(v)
+	}
+
+	if v := apiObject.RoleArn; v != nil {
+		tfMap["role_arn"] = aws.StringValue(v)
+	}
+
+	return []interface{}{tfMap}
+}
+
+// Legacy root attribute handling
+func flattenIotCloudwatchLogsActions(actions []*iot.Action) []interface{} {
+	results := make([]interface{}, 0)
+
+	for _, action := range actions {
+		if action == nil {
+			continue
+		}
+
+		if v := action.CloudwatchLogs; v != nil {
+			results = append(results, flattenIotCloudwatchLogsAction(v)...)
+		}
+	}
+
+	return results
+}
+
+func flattenIotCloudwatchLogsAction(apiObject *iot.CloudwatchLogsAction) []interface{} {
+	if apiObject == nil {
+		return nil
+	}
+
+	tfMap := make(map[string]interface{})
+
+	if v := apiObject.LogGroupName; v != nil {
+		tfMap["log_group_name"] = aws.StringValue(v)
 	}
 
 	if v := apiObject.RoleArn; v != nil {
@@ -2687,6 +2802,10 @@ func flattenIotErrorAction(errorAction *iot.Action) []map[string]interface{} {
 	}
 	if errorAction.CloudwatchMetric != nil {
 		results = append(results, map[string]interface{}{"cloudwatch_metric": flattenIotCloudwatchMetricActions(input)})
+		return results
+	}
+	if errorAction.CloudwatchLogs != nil {
+		results = append(results, map[string]interface{}{"cloudwatch_logs": flattenIotCloudwatchLogsActions(input)})
 		return results
 	}
 	if errorAction.DynamoDB != nil {
